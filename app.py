@@ -5,6 +5,16 @@ from env import DataCleaningEnv
 app = FastAPI(title='Data Cleaning OpenEnv')
 env = DataCleaningEnv()
 
+
+@app.get('/')
+def root():
+    return {'status': 'ok', 'service': 'data-cleaning-openenv'}
+
+
+@app.get('/health')
+def health():
+    return {'ok': True}
+
 @app.post('/reset')
 def reset(payload: ResetRequest):
     task_id = payload.task_id

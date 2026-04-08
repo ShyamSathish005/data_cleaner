@@ -1,3 +1,13 @@
+---
+title: Data Cleaner OpenEnv
+emoji: "🧹"
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # Data Cleaning Pipeline OpenEnv
 
 Submission-ready OpenEnv environment for realistic ETL/Data Ops cleaning tasks. The environment simulates agent-driven repair of messy CSV-style tables and scores each action with dense reward against a hidden golden dataframe.
@@ -89,6 +99,29 @@ uvicorn app:app --host 0.0.0.0 --port 7860
 ```bash
 docker build -t data-cleaning-openenv .
 docker run --rm -p 7860:7860 data-cleaning-openenv
+```
+
+## Hugging Face Spaces Deployment
+
+1. Create a new Space and choose `Docker` SDK.
+2. Connect this GitHub repo: `ShyamSathish005/data_cleaner`.
+3. Ensure these Space variables/secrets are set:
+	- `API_BASE_URL`
+	- `MODEL_NAME`
+	- `HF_TOKEN`
+	- `ENV_BASE_URL` (optional, only for external inference target)
+4. Deploy and verify:
+	- `GET /` returns 200.
+	- `POST /reset` works with `{"task_id":"fix_types"}`.
+	- `POST /step` works with `{"name":"submit","params":{}}`.
+
+Example quick checks after deploy:
+
+```bash
+curl -s https://<your-space>.hf.space/
+curl -s -X POST https://<your-space>.hf.space/reset \
+  -H 'Content-Type: application/json' \
+  -d '{"task_id":"fix_types"}'
 ```
 
 ## Baseline Inference
