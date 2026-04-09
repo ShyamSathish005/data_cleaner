@@ -15,12 +15,14 @@ Environment endpoint variable:
 - ENV_BASE_URL: OpenEnv server URL (defaults to localhost:7860)
 """
 
-LLM_API_BASE_URL = os.environ.get('API_BASE_URL', '').strip()
-MODEL_NAME = os.environ.get('MODEL_NAME', '').strip()
-HF_TOKEN = os.environ.get('HF_TOKEN', '').strip()
+API_BASE_URL = os.getenv("API_BASE_URL", "<your-actual-base-url>")
+MODEL_NAME = os.getenv("MODEL_NAME", "<your-active-model-name>")
+HF_TOKEN = os.getenv("HF_TOKEN")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
+
 ENV_BASE_URL = os.environ.get('ENV_BASE_URL', 'http://127.0.0.1:7860').strip()
 
-CLIENT = OpenAI(api_key=HF_TOKEN or 'missing-token', base_url=LLM_API_BASE_URL or None)
+CLIENT = OpenAI(api_key=HF_TOKEN, base_url=API_BASE_URL)
 
 def call_env(path: str, payload: Dict[str, Any]):
     url = ENV_BASE_URL.rstrip('/') + path
@@ -40,7 +42,7 @@ def ask_model_for_action(task_id: str, observation: Dict[str, Any]) -> Dict[str,
     )
     try:
         resp = CLIENT.chat.completions.create(
-            model=MODEL_NAME or 'gpt-4o-mini',
+            model=MODEL_NAME,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=120,
             temperature=0.0,
@@ -78,7 +80,7 @@ def baseline_plan(task_id: str):
 
 def run_episode(task_id: str, max_steps=20):
     print(
-        f"[START] task_id={task_id} model={MODEL_NAME or 'unset'} llm_api_base={LLM_API_BASE_URL or 'unset'} "
+        f"[START] task_id={task_id} model={MODEL_NAME} llm_api_base={API_BASE_URL} "
         f"env_base={ENV_BASE_URL}"
     )
     res = call_env('/reset', {'task_id': task_id})
