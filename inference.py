@@ -4,25 +4,17 @@ import urllib.request
 from typing import Dict, Any
 from openai import OpenAI
 
-"""Baseline inference for the Data Cleaning OpenEnv submission.
+"""Baseline inference for the Data Cleaning OpenEnv submission."""
 
-Mandatory variables consumed:
-- API_BASE_URL: OpenAI-compatible LLM endpoint
-- MODEL_NAME: model identifier
-- HF_TOKEN: API token/key for the endpoint
+API_BASE_URL = os.environ["API_BASE_URL"]
+API_KEY = os.environ["API_KEY"]
+MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "http://127.0.0.1:7860").strip()
 
-Environment endpoint variable:
-- ENV_BASE_URL: OpenEnv server URL (defaults to localhost:7860)
-"""
-
-API_BASE_URL = os.getenv("API_BASE_URL", "<your-actual-base-url>")
-MODEL_NAME = os.getenv("MODEL_NAME", "<your-active-model-name>")
-HF_TOKEN = os.getenv("HF_TOKEN")
-LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
-
-ENV_BASE_URL = os.environ.get('ENV_BASE_URL', 'http://127.0.0.1:7860').strip()
-
-CLIENT = OpenAI(api_key=HF_TOKEN, base_url=API_BASE_URL)
+CLIENT = OpenAI(
+    api_key=API_KEY,
+    base_url=API_BASE_URL
+)
 
 def call_env(path: str, payload: Dict[str, Any]):
     url = ENV_BASE_URL.rstrip('/') + path
@@ -35,48 +27,31 @@ def call_env(path: str, payload: Dict[str, Any]):
 def ask_model_for_action(task_id: str, observation: Dict[str, Any]) -> Dict[str, Any]:
     """Ask the model for one next action; return a safe fallback on parse/errors."""
     prompt = (
-        "Return only JSON with keys name and params for one next cleaning action. "
-        "Task ID: " + task_id + ". "
-        "Allowed names: fill_missing, cast_type, drop_duplicates, replace, normalize_dates, clamp_outliers, submit. "
-        "Observation: " + json.dumps(observation)
+        "You are an agent solving a data cleaning task. "
+        "Return valid JSON with keys \"name\" and \"params\" only, no markdown, no explanation.\n"
+        "Allowed action names: fill_missing, cast_type, drop_duplicates, replace, normalize_dates, clamp_outliers, submit.\n"
+        f"Task ID: {task_id}\n"
+        f"Observation: {json.dumps(observation)}"
     )
+    
+    resp = CLIENT.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=120,
+        temperature=0.0,
+    )
+    text = (resp.choices[0].message.content or '').strip()
+    
     try:
-        resp = CLIENT.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=120,
-            temperature=0.0,
-        )
-        text = (resp.choices[0].message.content or '').strip()
         parsed = json.loads(text)
         if isinstance(parsed, dict) and 'name' in parsed:
             return {'name': parsed.get('name'), 'params': parsed.get('params', {})}
-    except Exception:
-        pass
+        else:
+            print(f"Invalid JSON format for action: {text}")
+    except json.JSONDecodeError as e:
+        print(f"JSON parse error: {e} - Response: {text}")
+        
     return {'name': 'submit', 'params': {}}
-
-
-def baseline_plan(task_id: str):
-    if task_id == 'fix_types':
-        return [
-            {'name': 'cast_type', 'params': {'column': 'amount', 'target_type': 'float'}},
-            {'name': 'submit', 'params': {}},
-        ]
-    if task_id == 'normalize_dedupe':
-        return [
-            {'name': 'normalize_dates', 'params': {'column': 'date'}},
-            {'name': 'drop_duplicates', 'params': {}},
-            {'name': 'submit', 'params': {}},
-        ]
-    if task_id == 'full_pipeline':
-        return [
-            {'name': 'cast_type', 'params': {'column': 'income', 'target_type': 'float'}},
-            {'name': 'fill_missing', 'params': {'column': 'age', 'strategy': 40}},
-            {'name': 'clamp_outliers', 'params': {'column': 'age', 'low': 0, 'high': 120}},
-            {'name': 'submit', 'params': {}},
-        ]
-    return [{'name': 'submit', 'params': {}}]
-
 
 def run_episode(task_id: str, max_steps=20):
     print(
@@ -88,14 +63,10 @@ def run_episode(task_id: str, max_steps=20):
     steps = 0
     final_reward = 0.0
     done = False
-    plan = baseline_plan(task_id)
-
+    
     for step in range(max_steps):
         steps = step + 1
-        if step < len(plan):
-            action = plan[step]
-        else:
-            action = ask_model_for_action(task_id, obs)
+        action = ask_model_for_action(task_id, obs)
         try:
             step_resp = call_env('/step', action)
         except Exception:
