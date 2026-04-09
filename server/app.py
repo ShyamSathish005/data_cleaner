@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from models import Action, Observation, ResetRequest, RewardOut
 from env import DataCleaningEnv
 
@@ -16,8 +16,8 @@ def health():
     return {'ok': True}
 
 @app.post('/reset')
-def reset(payload: ResetRequest = None):
-    task_id = payload.task_id if payload and payload.task_id else 'fix_types'
+def reset(payload: ResetRequest = Body(default=ResetRequest(task_id='fix_types'))):
+    task_id = payload.task_id or 'fix_types'
     obs = env.reset(task_id)
     return {'observation': obs.model_dump()}
 

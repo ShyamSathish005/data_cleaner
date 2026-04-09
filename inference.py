@@ -4,17 +4,12 @@ import urllib.request
 from typing import Dict, Any
 from openai import OpenAI
 
-"""Baseline inference for the Data Cleaning OpenEnv submission."""
-
-API_BASE_URL = os.environ["API_BASE_URL"]
-API_KEY = os.environ["API_KEY"]
-MODEL_NAME = os.environ.get("MODEL_NAME", "gpt-4o-mini")
+API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY", "missing")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME   = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 ENV_BASE_URL = os.environ.get("ENV_BASE_URL", "http://127.0.0.1:7860").strip()
 
-CLIENT = OpenAI(
-    api_key=API_KEY,
-    base_url=API_BASE_URL
-)
+CLIENT = OpenAI(api_key=API_KEY, base_url=API_BASE_URL)
 
 def call_env(path: str, payload: Dict[str, Any]):
     url = ENV_BASE_URL.rstrip('/') + path
@@ -25,71 +20,91 @@ def call_env(path: str, payload: Dict[str, Any]):
         return json.loads(body)
 
 def ask_model_for_action(task_id: str, observation: Dict[str, Any]) -> Dict[str, Any]:
-    """Ask the model for one next action; return a safe fallback on parse/errors."""
     prompt = (
-        "You are an agent solving a data cleaning task. "
-        "Return valid JSON with keys \"name\" and \"params\" only, no markdown, no explanation.\n"
-        "Allowed action names: fill_missing, cast_type, drop_duplicates, replace, normalize_dates, clamp_outliers, submit.\n"
-        f"Task ID: {task_id}\n"
-        f"Observation: {json.dumps(observation)}"
+        "You are a data cleaning agent. Each turn you must return ONLY a JSON object\n"
+        "with exactly two keys: 'name' and 'params'. No markdown, no explanation,\n"
+        "no code fences. Just raw JSON.\n"
+        "Available actions: fill_missing, cast_type, drop_duplicates, replace,\n"
+        "normalize_dates, clamp_outliers, submit.\n"
+        "When you are done cleaning or have no more useful actions, return:\n"
+        "{\"name\": \"submit\", \"params\": {}}"
     )
+    # Use exact system prompt
     
-    resp = CLIENT.chat.completions.create(
-        model=MODEL_NAME,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=120,
-        temperature=0.0,
-    )
-    text = (resp.choices[0].message.content or '').strip()
-    
+    fallback_action = {'name': 'submit', 'params': {}}
     try:
+        completion = CLIENT.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": prompt},
+                {"role": "user", "content": f"Task ID: {task_id}\nObservation: {json.dumps(observation)}"}
+            ],
+            max_tokens=200,
+            temperature=0.0,
+        )
+        text = completion.choices[0].message.content.strip()
+        
+        # Handle cases where the model wraps JSON in markdown fences anyway
+        if text.startswith('```json'):
+            text = text[7:]
+        if text.startswith('```'):
+            text = text[3:]
+        if text.endswith('```'):
+            text = text[:-3]
+        text = text.strip()
+
         parsed = json.loads(text)
         if isinstance(parsed, dict) and 'name' in parsed:
             return {'name': parsed.get('name'), 'params': parsed.get('params', {})}
-        else:
-            print(f"Invalid JSON format for action: {text}")
-    except json.JSONDecodeError as e:
-        print(f"JSON parse error: {e} - Response: {text}")
-        
-    return {'name': 'submit', 'params': {}}
+        return fallback_action
+    except json.JSONDecodeError:
+        return fallback_action
+    except Exception as exc:
+        print(f"[DEBUG] Model request failed: {exc}", flush=True)
+        return fallback_action
 
 def run_episode(task_id: str, max_steps=20):
-    print(
-        f"[START] task_id={task_id} model={MODEL_NAME} llm_api_base={API_BASE_URL} "
-        f"env_base={ENV_BASE_URL}"
-    )
-    res = call_env('/reset', {'task_id': task_id})
-    obs = res['observation']
+    print(f"[START] task={task_id} env=data-cleaning-openenv model={MODEL_NAME}", flush=True)
     steps = 0
-    final_reward = 0.0
     done = False
+    final_score = 0.0
+    rewards = []
     
-    for step in range(max_steps):
-        steps = step + 1
-        action = ask_model_for_action(task_id, obs)
-        try:
-            step_resp = call_env('/step', action)
-        except Exception:
-            step_resp = call_env('/step', {'name': 'submit', 'params': {}})
-        obs = step_resp['observation']
-        final_reward = float(step_resp.get('reward', 0.0))
-        done = bool(step_resp.get('done', False))
-        score = float(step_resp.get('info', {}).get('accuracy', obs.get('accuracy', 0.0)))
-        print(
-            f"[STEP] task_id={task_id} step={steps} action={json.dumps(action, separators=(',', ':'))} "
-            f"reward={final_reward:.6f} score={score:.6f} done={str(done).lower()}"
-        )
-        if done:
-            break
-    final_score = float(obs.get('accuracy', 0.0))
-    print(
-        f"[END] task_id={task_id} steps={steps} final_score={final_score:.6f} "
-        f"final_reward={final_reward:.6f} status={'success' if done else 'max_steps'}"
-    )
-    return {'task_id': task_id, 'steps': steps, 'score': final_score, 'done': done}
+    try:
+        res = call_env('/reset', {'task_id': task_id})
+        obs = res.get('observation', {})
+        
+        for step in range(max_steps):
+            steps = step + 1
+            action = ask_model_for_action(task_id, obs)
+            error_msg = "null"
+            step_reward = 0.0
+            
+            try:
+                step_resp = call_env('/step', action)
+                obs = step_resp.get('observation', {})
+                step_reward = float(step_resp.get('reward', 0.0))
+                done = bool(step_resp.get('done', False))
+                final_score = float(step_resp.get('info', {}).get('accuracy', obs.get('accuracy', 0.0)))
+            except Exception as e:
+                error_msg = f"\"{str(e)}\""
+                done = True
+
+            rewards.append(step_reward)
+            action_json = json.dumps(action, separators=(',', ':'))
+            print(f"[STEP] step={steps} action={action_json} reward={step_reward:.2f} done={str(done).lower()} error={error_msg}", flush=True)
+            
+            if done:
+                break
+    except Exception as e:
+         print(f"[DEBUG] Episode crashed: {e}", flush=True)
+    finally:
+         rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+         print(f"[END] success={str(done).lower()} steps={steps} score={final_score:.3f} rewards={rewards_str}", flush=True)
+         return {'task_id': task_id, 'steps': steps, 'score': final_score, 'done': done}
 
 if __name__ == '__main__':
     tasks = ['fix_types', 'normalize_dedupe', 'full_pipeline']
-    results = [run_episode(task_id=t, max_steps=20) for t in tasks]
+    results = [run_episode(t) for t in tasks]
     avg = sum(r['score'] for r in results) / max(len(results), 1)
-    print(f"[END] run_summary tasks={len(results)} average_score={avg:.6f}")
+    print(f"[SUMMARY] tasks={len(results)} average_score={avg:.3f}", flush=True)
