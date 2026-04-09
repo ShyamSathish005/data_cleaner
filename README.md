@@ -1,13 +1,3 @@
----
-title: Data Cleaner OpenEnv
-emoji: "🧹"
-colorFrom: blue
-colorTo: indigo
-sdk: docker
-app_port: 7860
-pinned: false
----
-
 # Data Cleaning Pipeline OpenEnv
 
 Submission-ready OpenEnv environment for realistic ETL/Data Ops cleaning tasks. The environment simulates agent-driven repair of messy CSV-style tables and scores each action with dense reward against a hidden golden dataframe.
