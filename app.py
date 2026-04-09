@@ -16,10 +16,8 @@ def health():
     return {'ok': True}
 
 @app.post('/reset')
-def reset(payload: ResetRequest):
-    task_id = payload.task_id
-    if not task_id:
-        raise HTTPException(status_code=400, detail='task_id required')
+def reset(payload: ResetRequest = None):
+    task_id = payload.task_id if payload and payload.task_id else 'fix_types'
     obs = env.reset(task_id)
     return {'observation': obs.model_dump()}
 

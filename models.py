@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 
 
 class ResetRequest(BaseModel):
-    task_id: str
+    task_id: Optional[str] = None
 
 class Action(BaseModel):
     name: str
