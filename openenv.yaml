@@ -1,7 +1,7 @@
 name: data_cleaning_pipeline
 version: 0.1.0
 description: "OpenEnv: Data Cleaning Pipeline environment with easy/medium/hard tasks"
-author: Senior AI Engineer
+author: Shyam Sathish
 tags:
   - openenv
   - data-cleaning
@@ -13,15 +13,15 @@ tasks:
   - id: fix_types
     name: Easy - fix_types
     description: Cast numeric-like strings to numeric types.
-    rows: 10
+    rows: 120
   - id: normalize_dedupe
     name: Medium - normalize_dedupe
     description: Normalize dates and remove fuzzy duplicates.
-    rows: 50
+    rows: 100
   - id: full_pipeline
     name: Hard - full_pipeline
     description: Missing values, outliers, logic violations.
-    rows: 100
+    rows: 200
 schema:
   interface:
     - reset(task_id) -> task metadata
@@ -47,6 +47,7 @@ schema:
     validation_errors: list[string]
     accuracy: float
     step_count: int
+    steps_remaining: int
   reward:
     dense: true
     description: Reward is dense progress clipped to [0.0, 1.0] with invalid operation penalty and submit handling

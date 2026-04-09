@@ -1,81 +1,68 @@
-# Data Cleaning Pipeline OpenEnv
+# Data Cleaning OpenEnv
 
-Submission-ready OpenEnv environment for realistic ETL/Data Ops cleaning tasks. The environment simulates agent-driven repair of messy CSV-style tables and scores each action with dense reward against a hidden golden dataframe.
+Data Cleaning OpenEnv is a FastAPI-based environment for evaluating data-cleaning agents on realistic ETL-style tasks. It provides a structured action interface, dense rewards, and reproducible datasets across multiple difficulty levels.
 
-## Environment Overview
+## Overview
 
-The Data Cleaning Pipeline models common production data quality issues:
-- mixed numeric/string typing,
-- inconsistent date formatting,
-- fuzzy duplicates,
-- missing values,
-- outliers and logic violations.
+The environment simulates common production data-quality problems:
 
-This mirrors real-world pre-ingestion cleanup in analytics, data warehousing, and ML feature pipelines.
+- Mixed numeric and string types
+- Inconsistent date formats
+- Duplicate records
+- Missing values
+- Outliers and rule violations
 
-## OpenEnv Rubric Mapping
+It is designed for reinforcement-learning style interaction through `reset`, `step`, and `state` operations.
 
-- **Interface**: `reset(task_id)`, `step(action) -> (Observation, Reward, done, info)`, `state()`.
-- **API**: FastAPI endpoints `/reset`, `/step`, `/state` on port `7860`.
-- **Typed models**: Pydantic request/response models in `models.py`.
-- **Reward**: Dense delta reward + completion bonus + invalid-op penalty.
+## API Summary
 
-## Action Space
+Base URL (local): `http://127.0.0.1:7860`
 
-Actions use JSON shape:
+- `GET /` : Service metadata
+- `GET /health` : Health check
+- `POST /reset` : Start a task episode
+- `POST /step` : Apply one cleaning action
+- `GET /state` : Fetch current observation
+
+The service listens on port `7860` to align with Hugging Face Docker Space requirements.
+
+## Action Format
+
+All actions use this JSON structure:
 
 ```json
-{"name": "<action_name>", "params": {"...": "..."}}
+{
+  "name": "<action_name>",
+  "params": {}
+}
 ```
 
-| Action | Purpose | Expected params |
-|---|---|---|
-| `fill_missing` | Fill null values in a column | `{"column": "age", "strategy": "mean|ffill|<literal>"}` |
-| `cast_type` | Cast string/dirty numeric fields to a target type | `{"column": "amount", "target_type": "float|int"}` |
-| `drop_duplicates` | Remove duplicate rows (optional subset columns) | `{"subset": ["name", "date"]}` (optional) |
-| `replace` | Replace values globally or in one column | `{"column": "name", "old_value": "N/A", "new_value": ""}` |
-| `normalize_dates` | Parse and normalize date strings to ISO format | `{"column": "date"}` |
-| `clamp_outliers` | Clamp numeric column into bounds | `{"column": "age", "low": 0, "high": 120}` |
-| `submit` | End episode and trigger final scoring bonus check | `{}` |
+Supported action names:
 
-Backward-compatible aliases are supported (`cast`, `dedupe`) for convenience.
+- `fill_missing`
+- `cast_type`
+- `drop_duplicates`
+- `replace`
+- `normalize_dates`
+- `clamp_outliers`
+- `submit`
 
-## Observation Space
+Backward-compatible aliases are accepted for some actions.
 
-Each step returns:
-- `dataframe_preview`: first 5 rows as JSON-safe dict records,
-- `markdown_preview`: markdown table preview of first 5 rows,
-- `null_counts`: per-column null counts,
-- `validation_errors`: runtime/action and logic-validation diagnostics,
-- `accuracy`: dense score in `[0, 1]` vs hidden golden dataframe,
-- `step_count`: current step number.
+## Tasks
 
-All NumPy/Pandas values are cast to Python primitives (`int`, `float`, `str`, `bool`, `None`) before serialization.
-
-## Task Difficulty
-
-- **Easy — `fix_types` (10 rows)**
-	- Messiness: numeric values embedded as strings (`"1,200"`, `"$12.50"`).
-	- Goal: cast to clean numeric types.
-
-- **Medium — `normalize_dedupe` (50 rows + 10% dupes)**
-	- Messiness: mixed date formats (`MM/DD/YY`, ISO), fuzzy-like name variants, injected duplicate rows.
-	- Goal: normalize records and remove duplicates.
-
-- **Hard — `full_pipeline` (100 rows)**
-	- Messiness: missing values, outliers, and logic violations (e.g., implausible ages).
-	- Goal: apply full cleaning sequence toward golden parity.
+- `fix_types`: Focus on type normalization
+- `normalize_dedupe`: Date normalization and duplicate handling
+- `full_pipeline`: Full cleaning workflow with missing values and outliers
 
 ## Reward Design
 
-- Dense reward: `reward = current_accuracy - previous_accuracy`.
-- Completion bonus: `+1.0` on `submit` when `accuracy == 1.0`.
-- Invalid operation penalty: `-0.05`.
-- Anti-loop control: `done=True` when `step_count >= 15`.
+- Step reward: change in accuracy from previous step
+- Completion bonus: awarded on `submit` when accuracy is perfect
+- Invalid action penalty: small negative reward
+- Episode cap: fixed maximum step count
 
-## Setup & Run
-
-### Local (venv)
+## Run Locally
 
 ```bash
 python3 -m venv .venv
@@ -84,122 +71,77 @@ pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 7860
 ```
 
-### Docker (Hugging Face Spaces style)
+## Run with Docker
 
 ```bash
 docker build -t data-cleaning-openenv .
 docker run --rm -p 7860:7860 data-cleaning-openenv
 ```
 
-## Hugging Face Spaces Deployment
-
-1. Create a new Space and choose `Docker` SDK.
-2. Connect this GitHub repo: `ShyamSathish005/data_cleaner`.
-3. Ensure these Space variables/secrets are set:
-	- `API_BASE_URL`
-	- `MODEL_NAME`
-	- `HF_TOKEN`
-	- `ENV_BASE_URL` (optional, only for external inference target)
-4. Deploy and verify:
-	- `GET /` returns 200.
-	- `POST /reset` works with `{"task_id":"fix_types"}`.
-	- `POST /step` works with `{"name":"submit","params":{}}`.
-
-Example quick checks after deploy:
+## Quick API Test
 
 ```bash
-curl -s https://<your-space>.hf.space/
-curl -s -X POST https://<your-space>.hf.space/reset \
-  -H 'Content-Type: application/json' \
+curl -s http://127.0.0.1:7860/
+
+curl -s -X POST http://127.0.0.1:7860/reset \
+  -H "Content-Type: application/json" \
   -d '{"task_id":"fix_types"}'
+
+curl -s -X POST http://127.0.0.1:7860/step \
+  -H "Content-Type: application/json" \
+  -d '{"name":"submit","params":{}}'
 ```
+
+## Hugging Face Space Deployment
+
+This repository is configured for a Docker Space.
+
+1. Create or open your Hugging Face Space with Docker SDK.
+2. Push this repository to the Space remote.
+3. Confirm the app starts and responds on port `7860`.
+
+Suggested environment variables for evaluation workflows:
+
+- `API_BASE_URL`
+- `MODEL_NAME`
+- `HF_TOKEN`
+- `ENV_BASE_URL` (optional if not using local default)
 
 ## Baseline Inference
 
-The baseline script is `inference.py` at repo root and runs all three tasks for reproducible scoring output.
-
-Required variables (per evaluator instructions):
-- `API_BASE_URL` (OpenAI-compatible LLM endpoint)
-- `MODEL_NAME`
-- `HF_TOKEN`
-
-Environment endpoint variable:
-- `ENV_BASE_URL` (OpenEnv server URL, default `http://127.0.0.1:7860`)
-
-Run:
+Run the baseline script after setting required variables:
 
 ```bash
 export ENV_BASE_URL=http://127.0.0.1:7860
 export API_BASE_URL=https://your-openai-compatible-endpoint/v1
 export MODEL_NAME=gpt-4o
-export HF_TOKEN=your_key
+export HF_TOKEN=your_token
 python inference.py
 ```
 
-Inference logs are emitted in strict marker format:
-- `[START] ...`
-- `[STEP] ...`
-- `[END] ...`
-
-## Pre-Submission Validation
-
-Run the local validator before submission:
+## Validation
 
 ```bash
 python pre_validation.py
 ```
 
-Useful flags:
-- `SKIP_DOCKER=1 python pre_validation.py` to skip Docker build during quick local checks.
-- `SPACE_URL=https://<your-space>.hf.space python pre_validation.py` to validate deployed Space endpoints.
-
-## GitHub + Hugging Face Push Checklist
-
-1. Commit and push to GitHub.
-2. Create/attach a Hugging Face Space (Docker SDK) to the same repository contents.
-3. In Space variables/secrets, define:
-	- `API_BASE_URL`
-	- `MODEL_NAME`
-	- `HF_TOKEN`
-	- `ENV_BASE_URL` (if your environment URL is not local default)
-4. Confirm Space returns `200` on `/reset` and `inference.py` completes.
-
-## Final Smoke Test
-
-Use a basic endpoint ping script to verify `/reset` and `/step` handle NaN-heavy tasks without 500 errors:
+To skip Docker during quick local checks:
 
 ```bash
-python - <<'PY'
-import json, urllib.request
-
-def post(path, payload):
-		req = urllib.request.Request(
-				f"http://127.0.0.1:7860{path}",
-				data=json.dumps(payload).encode("utf-8"),
-				headers={"Content-Type": "application/json"},
-				method="POST",
-		)
-		with urllib.request.urlopen(req, timeout=30) as r:
-				return json.loads(r.read().decode("utf-8"))
-
-print(post('/reset', {'task_id': 'full_pipeline'}))
-print(post('/step', {'name': 'fill_missing', 'params': {'column': 'age', 'strategy': 'mean'}}))
-print(post('/step', {'name': 'submit', 'params': {}}))
-PY
+SKIP_DOCKER=1 python pre_validation.py
 ```
 
-## Directory Structure
+## Project Structure
 
-```
+```text
 data_cleaning_openenv/
 ├── app.py
 ├── env.py
 ├── models.py
 ├── inference.py
+├── pre_validation.py
 ├── openenv.yaml
-├── Dockerfile
 ├── requirements.txt
+├── Dockerfile
 └── README.md
 ```
-
-This directory is ZIP-ready for upload and git push to a Hugging Face Space tagged `openenv`.

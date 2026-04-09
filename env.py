@@ -25,11 +25,11 @@ class DataCleaningEnv:
         self.done = False
         self.validation_errors = []
         if task_id == 'fix_types':
-            self.gold_df, self.current_df = self._make_fix_types(10, seed=42)
+            self.gold_df, self.current_df = self._make_fix_types(120, seed=42)
         elif task_id == 'normalize_dedupe':
-            self.gold_df, self.current_df = self._make_normalize_dedupe(50, seed=43)
+            self.gold_df, self.current_df = self._make_normalize_dedupe(100, seed=43)
         elif task_id == 'full_pipeline':
-            self.gold_df, self.current_df = self._make_full_pipeline(100, seed=44)
+            self.gold_df, self.current_df = self._make_full_pipeline(200, seed=44)
         else:
             raise ValueError('Unknown task_id')
         return self._get_obs()
@@ -87,10 +87,10 @@ class DataCleaningEnv:
 
         current_accuracy = self._compute_accuracy()
         delta = current_accuracy - self.previous_accuracy
-        # Keep dense progress while guaranteeing reward is in [0.0, 1.0].
-        reward = max(0.0, min(1.0, delta))
+        # Allow negative reward for regressive actions
+        reward = max(-1.0, min(1.0, delta))
         if invalid:
-            reward = max(0.0, reward - 0.05)
+            reward = reward - 0.05
         if self.step_count >= self.max_steps and not self.done:
             self.validation_errors.append('max_steps_reached')
 
@@ -135,6 +135,7 @@ class DataCleaningEnv:
             validation_errors=[str(v) for v in validation_errors],
             accuracy=float(accuracy),
             step_count=int(self.step_count),
+            steps_remaining=max(0, int(self.max_steps - self.step_count)),
         )
 
     def _to_python_json_types(self, obj):
@@ -201,13 +202,37 @@ class DataCleaningEnv:
         gold_rows = []
         for i in range(n):
             val = round(np.random.uniform(0, 5000), 2)
+            name = fake.name()
+            is_active_val = bool(np.random.randint(0, 2))
+            dt = fake.date_between(start_date='-5y', end_date='today')
+            
             # store messy variants
             if np.random.rand() < 0.5:
-                messy = f"{val:,.2f}"
+                messy_amount = f"{val:,.2f}"
             else:
-                messy = f"${val:,.2f}"
-            rows.append({'id': i, 'amount': messy})
-            gold_rows.append({'id': i, 'amount': val})
+                messy_amount = f"${val:,.2f}"
+                
+            if np.random.rand() < 0.5:
+                messy_active = str(is_active_val).lower()
+            else:
+                messy_active = "1" if is_active_val else "0"
+                
+            messy_date = dt.strftime('%m/%d/%Y')  # string format
+                
+            rows.append({
+                'id': i, 
+                'name': name, 
+                'is_active': messy_active, 
+                'joined_date': messy_date, 
+                'amount': messy_amount
+            })
+            gold_rows.append({
+                'id': i, 
+                'name': name, 
+                'is_active': is_active_val, 
+                'joined_date': dt.isoformat(), 
+                'amount': val
+            })
         return pd.DataFrame(gold_rows), pd.DataFrame(rows)
 
     def _make_normalize_dedupe(self, n, seed=0):
@@ -265,6 +290,13 @@ class DataCleaningEnv:
         elif dtype in ('int', 'int64'):
             self.current_df[column] = self.current_df[column].astype(str).str.replace(r'[\$,]', '', regex=True)
             self.current_df[column] = pd.to_numeric(self.current_df[column], errors='coerce').fillna(0).astype(int)
+        elif dtype in ('bool', 'boolean'):
+            mapping = {'true': True, 'false': False, '1': True, '0': False, 't': True, 'f': False}
+            self.current_df[column] = self.current_df[column].astype(str).str.lower().map(mapping).fillna(False)
+        elif dtype in ('datetime', 'date'):
+            self.current_df[column] = pd.to_datetime(self.current_df[column], errors='coerce')
+        elif dtype in ('str', 'string'):
+            self.current_df[column] = self.current_df[column].astype(str)
         else:
             raise ValueError('unsupported dtype')
 

@@ -16,6 +16,7 @@ class Observation(BaseModel):
     validation_errors: List[str]
     accuracy: float
     step_count: int
+    steps_remaining: int
 
 class RewardOut(BaseModel):
     reward: float
