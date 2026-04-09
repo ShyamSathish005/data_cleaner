@@ -86,6 +86,7 @@ def run_episode(task_id: str, max_steps=20):
                 step_reward = float(step_resp.get('reward', 0.0))
                 done = bool(step_resp.get('done', False))
                 final_score = float(step_resp.get('info', {}).get('accuracy', obs.get('accuracy', 0.0)))
+                final_score = max(0.01, min(0.99, final_score))
             except Exception as e:
                 error_msg = f"\"{str(e)}\""
                 done = True
@@ -99,6 +100,7 @@ def run_episode(task_id: str, max_steps=20):
     except Exception as e:
          print(f"[DEBUG] Episode crashed: {e}", flush=True)
     finally:
+         final_score = max(0.01, min(0.99, final_score))
          rewards_str = ",".join(f"{r:.2f}" for r in rewards)
          print(f"[END] success={str(done).lower()} steps={steps} score={final_score:.3f} rewards={rewards_str}", flush=True)
          return {'task_id': task_id, 'steps': steps, 'score': final_score, 'done': done}

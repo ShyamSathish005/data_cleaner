@@ -381,8 +381,9 @@ class DataCleaningEnv:
             matches += int(comp.sum())
             total += len(comp)
         if total == 0:
-            return 0.0
-        return matches / total
+            return 0.01
+        raw = matches / total
+        return max(0.01, min(0.99, raw))
 
 
 # If run as module for quick manual tests
